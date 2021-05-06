@@ -1,3 +1,5 @@
+import typing
+
 Import([
 	'thirdPartyEnv',
 	'sourceDir',
@@ -84,7 +86,17 @@ def espeak_compilePhonemeData_buildAction(target,source,env):
 
 env['BUILDERS']['espeak_compilePhonemeData']=Builder(action=env.Action(espeak_compilePhonemeData_buildAction,"Compiling phoneme data"),emitter=espeak_compilePhonemeData_buildEmitter)
 
+#: map rules files to lang codes to by used when compiling a dict eg "zhy_rules"
+fixInvalidLangCodes: typing.Dict[str, bytes] = {
+	"zhy_rules": b"yue",  # https://github.com/espeak-ng/espeak-ng/issues/933
+}
+
 def espeak_compileDict_buildAction(target,source,env):
+	"""
+	@param target: The langCode_dict file to build
+	@param source: Build from the langCode_rules
+	@param env: Scons build environment
+	"""
 	# We want the eSpeak dll to be freed after each dictionary.
 	# This is because it writes to stderr but doesn't flush it.
 	# Unfortunately, there's no way we can flush it or use a different stream
@@ -92,15 +104,31 @@ def espeak_compileDict_buildAction(target,source,env):
 	espeak=AutoFreeCDLL(espeakLib[0].abspath)
 	espeak.espeak_Initialize(0,0,os.fsencode(target[0].Dir('..').abspath),0x8000)
 	try:
-		lang=source[0].name.split('_')[0].encode()
-		v=espeak_VOICE(languages=lang+b'\x00')
-		if espeak.espeak_SetVoiceByProperties(ctypes.byref(v))!=0:
-			print("espeak_compileDict_action: failed to switch to language %s"%lang)
+		langRulesName:str = source[0].name  # example: "zhy_rules"
+		langCode = fixInvalidLangCodes.get(langRulesName, default=None)
+		if langCode is None:
+			langCode:bytes = langRulesName.split('_')[0].encode()  # example: b"zhy"
+		voice = espeak_VOICE(languages=langCode + b'\x00')
+		setVoiceResult = espeak.espeak_SetVoiceByProperties(ctypes.byref(voice))
+		if 0 != setVoiceResult:
+			print(
+				f"espeak_compileDict_action:"
+				f" failed to switch to language {langCode}"
+				f" for lang rules {langRulesName}"
+				f", result: {setVoiceResult}"
+			)
 			return 1
 		dictPath=os.fsencode(os.path.split(source[0].abspath)[0]+'/')
-		if espeak.espeak_ng_CompileDictionary(dictPath,None,0,None)!=0:
-			print("espeak_compileDict_action: failed to compile dictionary for  language %s"%lang)
-			return
+		compileDictResult = espeak.espeak_ng_CompileDictionary(dictPath, None, 0, None)
+		if 0 != compileDictResult:
+			print(
+				"espeak_compileDict_action:"
+				f" failed to compile dictionary {dictPath}"
+				f" from rules {langRulesName}"
+				f" using language {langCode}"
+				f", result: {compileDictResult}"
+			)
+			return 1
 	finally:
 		espeak.espeak_Terminate()
 
@@ -182,7 +210,7 @@ for i in phonemeData:
 env.Install(espeakRepo.Dir('dictsource'),env.Glob(os.path.join(espeakRepo.abspath,'dictsource','extra','*_*')))
 
 #Compile all dictionaries
-missingDicts=['zhy', ] #'mt','tn','tt']
+missingDicts = []  # 'zhy','mt','tn','tt']
 dictSourcePath=espeakRepo.Dir('dictsource').abspath
 # Remove emoji files before compiling dictionaries.
 # Currently many of these simply crash eSpeak at runtime.
