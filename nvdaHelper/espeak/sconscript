@@ -105,7 +105,7 @@ def espeak_compileDict_buildAction(target,source,env):
 	espeak.espeak_Initialize(0,0,os.fsencode(target[0].Dir('..').abspath),0x8000)
 	try:
 		langRulesName:str = source[0].name  # example: "zhy_rules"
-		langCode = fixInvalidLangCodes.get(langRulesName, default=None)
+		langCode = fixInvalidLangCodes.get(langRulesName)
 		if langCode is None:
 			langCode:bytes = langRulesName.split('_')[0].encode()  # example: b"zhy"
 		voice = espeak_VOICE(languages=langCode + b'\x00')
